@@ -124,9 +124,9 @@ $(document).ready(function () {
 </div>
 
 
-<div id="log-likelihood-funktion" class="section level2">
-<h2>Log-Likelihood Funktion</h2>
-<p>Berechnet die logarithmierten Likelihoodwerte - Matrixschreibweise wurde gewählt um Schleifen zu vermeiden:</p>
+<div id="log-likelihooden-funktion" class="section level2">
+<h2>Log-Likelihooden Funktion</h2>
+<p>Berechnet die logarithmierte Likelihood - Matrixschreibweise wurde gewählt um Schleifen zu vermeiden:</p>
 <pre class="r"><code>logLikelihood = function(X,y,betas,sd)
 {
   yHat = X%*%betas
@@ -134,6 +134,20 @@ $(document).ready(function () {
                       dnorm(y, mean=yHat, sd = sd, log = TRUE)
                       )
   return(sumLikelihoods)
+}</code></pre>
+<pre class="r"><code>logPriors = function(betas,sd, meanNormalPrior = 0, sdNormalPrior = 5, shapeInvGammaPrior=1)
+{
+  lenBetas = length(betas)
+  
+  sumLogBetasPrior = sum(
+                        dnorm(betas, mean = rep(meanNormalPrior,lenBetas),
+                                      sd = rep(sdNormalPrior,lenBetas, log = TRUE)
+                        )
+                      )
+  
+  logSdPrior = log(dinvgamma(sd, shape=shapeInvGammaPrior))
+  
+  return(sumLogBetasPrior + logSdPrior)
 }</code></pre>
 </div>
 <div id="including-plots" class="section level2">

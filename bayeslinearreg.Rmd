@@ -12,7 +12,7 @@ library(truncnorm)
 
 
 ## Log-Likelihood Funktion
-Berechnet die logarithmierten Likelihoodwerte - Matrixschreibweise wurde gewählt um Schleifen zu vermeiden:
+Berechnet die logarithmierte Likelihood - Matrixschreibweise wurde gewählt um Schleifen zu vermeiden:
 
 ```{r loglikelihood}
 logLikelihood = function(X,y,betas,sd)
@@ -24,6 +24,40 @@ logLikelihood = function(X,y,betas,sd)
   return(sumLikelihoods)
 }
 ```
+
+Berechnet logarithmierte 'Likelihood'-Werte der Prior Verteilungen und summiert diese auf
+
+```{r loglikePrior}
+logPriors = function(betas,sd, meanNormalPrior = 0, sdNormalPrior = 5, shapeInvGammaPrior=1)
+{
+  lenBetas = length(betas)
+  
+  sumLogBetasPrior = sum(
+                        dnorm(betas, mean = rep(meanNormalPrior,lenBetas),
+                                      sd = rep(sdNormalPrior,lenBetas, log = TRUE)
+                        )
+                      )
+  
+  logSdPrior = log(dinvgamma(sd, shape=shapeInvGammaPrior))
+  
+  return(sumLogBetasPrior + logSdPrior)
+}
+```
+
+
+
+
+posterior <- function(X, y, betas, sd, meanNormalPrior=0, sdNormalPrior=5, shapeInvGammaPrior=1){
+  
+  return (
+          logLikelihood(X, y, betas, sd) +
+          logPriors(betas, sd, meanNormalPrior, sdNormalPrior, shapeInvGammaPrior)
+          )
+}
+
+
+
+
 
 
 
