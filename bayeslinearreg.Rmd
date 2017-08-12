@@ -10,55 +10,244 @@ library(MCMCpack)
 library(truncnorm)
 ```
 
+# Funktionen für den Metropolis-Hastings Algorithmus
 
-## Log-Likelihood Funktion
-Berechnet die logarithmierte Likelihood - Matrixschreibweise wurde gewählt um Schleifen zu vermeiden:
+## Log-Likelihood Funktionen
+Berechnet die logarithmierte Likelihood für das Lineare Modell und summiert über alle Beobachtungen - Matrixschreibweise wurde gewählt um Schleifen zu vermeiden:
 
 ```{r loglikelihood}
 logLikelihood = function(X,y,betas,sd)
 {
   yHat = X%*%betas
+
   sumLikelihoods = sum(
                       dnorm(y, mean=yHat, sd = sd, log = TRUE)
                       )
+  
   return(sumLikelihoods)
 }
 ```
 
-Berechnet logarithmierte 'Likelihood'-Werte der Prior Verteilungen und summiert diese auf
+Berechnet logarithmierte 'Likelihood'-Werte der Prior Verteilungen und summiert diese über alle Prior-
+verteilungen auf. Die Hyperparameter der Priorverteilungen können flexibel angepasst werden - ein einzelner
+Skalar für die Parameter der Beta-Priors wird dann für alle Beta-Priors verwendendet; alternativ können auch
+Prior-Parameter für jede Prior einzeln in Form eines Vektors eingegeben werden (siehe die eigentliche Funktion 'metropolisBayesRegression').
 
 ```{r loglikePrior}
-logPriors = function(betas,sd, meanNormalPrior = 0, sdNormalPrior = 5, shapeInvGammaPrior=1)
+logPriors = function(betas,sd, meanNormalPrior = 0, sdNormalPrior = 5, shapeInvGammaPrior = 1, scaleInvGamma = 1)
 {
   lenBetas = length(betas)
+  if (length(meanNormalPrior) == 1)
+  {
+    meanNormalPrior = rep(meanNormalPrior,lenBetas)
+  }
+  
+  if (length(sdNormalPrior) == 1)
+  {
+    sdNormalPrior = rep(sdNormalPrior,lenBetas)
+  }
   
   sumLogBetasPrior = sum(
-                        dnorm(betas, mean = rep(meanNormalPrior,lenBetas),
-                                      sd = rep(sdNormalPrior,lenBetas, log = TRUE)
-                        )
-                      )
+    dnorm(betas, mean = meanNormalPrior,
+          sd = sdNormalPrior, log = TRUE)
+    )
   
-  logSdPrior = log(dinvgamma(sd, shape=shapeInvGammaPrior))
+  
+  logSdPrior = log(dinvgamma(sd, shape=shapeInvGammaPrior, scale=scaleInvGamma))
   
   return(sumLogBetasPrior + logSdPrior)
+
 }
+```
+
+
+## Posterior Density
+Summiert alle Likelihood-Funktionen zur Berechnung der (Log) Posterior-Density auf
+
+```{r posteriorLikelihood}
+posterior <- function(X, y, betas, sd, meanNormalPrior=0, sdNormalPrior=5, shapeInvGammaPrior=1,scaleInvGammaPrior=1){
+  
+  return (
+    logLikelihood(X, y, betas, sd) +
+      logPriors(betas, sd, meanNormalPrior, sdNormalPrior, shapeInvGammaPrior, scaleInvGammaPrior)
+  )
+}
+```
+
+## Proposal Densities (hier eigentlich Funktionen)
+
+Um möglichst flexibel mit verschiedenen Proposal-Densities experimentieren zu können, können diese
+in Form der unten programmierten Funktionen direkt als Argument an die eigentlich Regressions-Funktion
+eingegeben werden.
+
+### Proposal Function 1
+Die Idee hinter proposalFunction1 ist die Simulierung eines klassichen RandomWalk-Prozesses mit Normalverteilung. Da der Varianz- (bzw. in R ja der Standardabweichungs-)parameter > 0 sein muss
+und mit jeder Proposal-Standardabweichung <=0 eine Realisation der Markov-Chain sofort verworfen
+werden würde (NaN-Werte in den Posterior-Densitites bekommen weiter unten den Dichtewert 0, damit der
+MH-Algorithmus unproblematisch weiter läuft), wird als Proposal-Density für die Standardabweichung eine
+trunkierte Normalverteilung mit 0 als Lower-Bound genutzt.
+```{r proposal function 1}
+
+
+proposalFunction1 <- function(betas, sd, betaProposalSd = 0.5, sdProposalSd = 0.5){
+  
+  lenBetas = length(betas)
+  
+  proposalBetas = rnorm(lenBetas, mean = betas, sd = betaProposalSd)
+  proposalSd = rtruncnorm(1,mean=sd, sd=sdProposalSd, a=0, b=Inf)
+  
+  return(list(proposalBetas, proposalSd))
+  
+}
+```
+
+
+### Proposal Function 2
+proposalFunction2 nutzt eine gewöhnliche Normalverteilung wie häufig vorgeschlagen auch für die 
+Standardabweichung. Entsprechend sollten für die Skalenparameter (hier 'sdProposalSd') auch entsprechend
+kleinere Werte gewählt werden als bei der trunkierten Normalverteilung, um allzu häufige Sprünge in 
+den Bereich <=0 zu vermeiden.
+```{r proposal function 2}
+proposalFunction2 <- function(betas, sd, betaProposalSd = 0.5, sdProposalSd = 0.5){
+  
+  lenBetas = length(betas)
+  
+  proposalBetas = rnorm(lenBetas, mean = betas, sd = betaProposalSd)
+  proposalSd = rnorm(1,mean=sd, sd=sdProposalSd)
+  
+  return(list(proposalBetas, proposalSd))
+  
+}
+```
+
+
+### Proposal Function 3
+
+Die letzte Proposal Function arbeitet mit Gleichverteilungen. Um auch hier negative Proposals für die
+Standardabweichung zu vermeiden, wird die untere Grenze des entsprechenden RNGs bei 0 trunkiert. Die
+obere Grenze wird so festgelegt, dass in jedem Fall die aktuelle Standardabweichung den Erwartungswert
+der Gleichverteilung bildet.
+```{r proposal function 3}
+proposalFunction3 <- function(betas, sd, betaProposalInterval = 0.5, sdProposalInterval = 0.5){
+  
+  lenBetas = length(betas)
+  
+  proposalBetas = runif(lenBetas, min = betas-betaProposalInterval, max = betas + betaProposalInterval)
+  
+  unifLowerBound = max(sd-sdProposalInterval,0)
+  unifUpperBound = sd + (sd-unifLowerBound)
+  proposalSd = runif(1,min = unifLowerBound, max = unifUpperBound)
+  
+  return(list(proposalBetas, proposalSd))
+  
+}
+
 ```
 
 
 
 
-posterior <- function(X, y, betas, sd, meanNormalPrior=0, sdNormalPrior=5, shapeInvGammaPrior=1){
+## Bayesian Linear Regression (MH-Algorithmus)
+
+Der eigentliche MH-Algorithmus. Es kann eine beliebige Anzahl an Features verwendet werden (in R allerdings ineffizient - auch da nicht parallelisierbar)
+
+Erklärung der Parameter:
+
+* **X**: Matrix der exogenen Variablen (wichtig ist, dass der Datentyp in R "matrix" und nicht "data.frame" ist, da sonst die Matrixoperationen fehlschlagen)
+* **y**: Vektor/Matrix der endogenen Variable
+* **startValuesBeta**: Startwerte für die Beta-Parameter im MH-Algorithmus
+* **startValueSd**: Startwerte für Standardabweichung
+* **nIterations**: Anzahl der Iterationen im MH-Algorithmus **nach** der Burn-In Phase
+* **nBurnIn**: Anzahl der Burn-In Iterationen
+* **meanNormalPrior**: Skalar **oder** Vektor der/des Erwartungswerte(s) der Beta-Prior(s) - wird lediglich ein Skalar übergeben, wird dieser für alle Beta-Priors verwendet
+* **sdNormalPrior**: Wie *meanNormalPrior* für die Standardabweichung der Beta-Prior
+* **shapeInvGamma**: Skalar für den Shape-Parameter der Inversen Gammaverteilung der Prior der Standardabweichung
+* **scaleInvGamma**: Scale-Parameter der Inversen Gammaverteilung.
+* **proposalFunction**: individuelle Proposal-Funktion (siehe entsprechenden Punkt weiter oben)
+* **betaProposalScaleParameter**: Skalenparameter der ProposalFunktion der Betas - nicht zwangsläufig die Varianz/bzw. Standardabweichung (abhängig von der Proposal-Verteilung)
+* **sdProposalScaleParameter**: Skalenparameter der ProposalFunktion der Standardabweichung
+
+Da die acceptance-rate im MH-Algorithmus vor allem von den gewählten Skalenparametern abhängt können hier entsprechende Anpassungen vorgenommen werden.
+
+```{r metropolis Linear Bayes Regression}
+metropolisBayesRegression = function (X, y, startValuesBeta, startValueSd,
+                          nIterations=10000, nBurnIn=500, meanNormalPrior=0, sdNormalPrior=5, shapeInvGammaPrior=1, scaleInvGammaPrior = 1,
+                          proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.5, sdProposalScaleParameter = 0.5)
+{
+  if(ncol(X)!=length(startValuesBeta))
+  {
+    stop("nrow(X) does not match length(startValuesBeta)")
+  }
   
-  return (
-          logLikelihood(X, y, betas, sd) +
-          logPriors(betas, sd, meanNormalPrior, sdNormalPrior, shapeInvGammaPrior)
-          )
+  
+  totalIterations = nIterations + nBurnIn
+  lenBetas = ncol(X)
+  
+  markovChain = data.frame(matrix(NaN, nrow = totalIterations+1, ncol=lenBetas+1))
+  colnames(markovChain) = c(paste("BETA",seq(0,lenBetas-1)),"SD")
+  
+  markovChain[1, 1:lenBetas] = startValuesBeta
+  markovChain[1, lenBetas+1] = startValueSd
+  
+  for (iteration in 1:totalIterations)
+  {
+    currentBetas = as.numeric(markovChain[iteration, 1:lenBetas])
+    currentSd = as.numeric(markovChain[iteration, lenBetas+1])
+    
+    proposalValues = proposalFunction(currentBetas, currentSd, betaProposalScaleParameter, sdProposalScaleParameter)
+    
+    proposalBetas = proposalValues[[1]]
+    proposalSd = proposalValues[[2]]
+    
+    currentPosterior = posterior(X, y, currentBetas, currentSd, meanNormalPrior, sdNormalPrior, shapeInvGammaPrior, scaleInvGammaPrior)
+    proposalPosterior = posterior(X, y, proposalBetas, proposalSd, meanNormalPrior, sdNormalPrior, shapeInvGammaPrior, scaleInvGammaPrior)
+
+    likelihoodRatio = exp(proposalPosterior - currentPosterior)
+    
+
+    if (is.nan(likelihoodRatio))
+      {
+        likelihoodRatio = 0
+      }
+    
+
+    comparisonValue = min(likelihoodRatio, 1)
+    
+    
+    
+    if(runif(1)<comparisonValue)
+    {
+      markovChain[iteration+1, 1:lenBetas] = proposalBetas
+      markovChain[iteration+1, lenBetas+1] = proposalSd
+    }
+    else
+    {
+      markovChain[iteration+1,] = markovChain[iteration,]
+    }
+  
+  }
+  
+  acceptanceRate = 1-mean(duplicated(markovChain[-(1:nBurnIn),]))
+
+  if (lenBetas>1)
+  {
+    meanBetas = colMeans(markovChain[-(1:nBurnIn),1:lenBetas])
+  }
+  else
+  {
+    meanBetas = mean(markovChain[-(1:nBurnIn),1:lenBetas])
+  }
+
+  meanSd = mean(markovChain[-(1:nBurnIn), lenBetas+1])
+  
+  simulationResult = list(meanBetas, meanSd, markovChain[-(1:nBurnIn),],
+                          markovChain, markovChain[(1:nBurnIn),], acceptanceRate) 
+  
+  return(simulationResult)
+
 }
 
-
-
-
-
+```
 
 
 
