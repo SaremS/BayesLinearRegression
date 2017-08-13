@@ -389,6 +389,31 @@ print(summary(priorRegression))</code></pre>
 ## Multiple R-squared:  0.7798, Adjusted R-squared:  0.7248 
 ## F-statistic: 14.17 on 2 and 8 DF,  p-value: 0.00235</code></pre>
 <p>Wir nehmen nun an, dass die oben errechneten Werte aus einer vorhergehenden Studie stammen und uns lediglich die Regressionsergebnisse vorliegen, nicht aber die einzelnen Daten (da wir ansonsten einfach die a priori Daten mit unseren vereinen und die Regression anhand der vereinigten Daten durchführen könnten, was informative Prior-Verteilungen wieder hinfällig machen würde)</p>
+<pre class="r"><code>betaPriorMeans = priorRegression$coefficients
+betaPriorSDs = as.numeric(summary(priorRegression)[[4]][,2])
+
+sdPriorExpectation = summary(priorRegression)[[6]]</code></pre>
+<p>Die Prior Parameter der Betas können wir direkt aus den Ergebnissen der Regression übernehmen. Um die Inverse Gamma Prior für die Standardabweichung vollständig spezifizieren zu können, benötigen wir Shape- und Scaleparameter Alpha und Beta. Um diese zu bestimmen, betrachten wir Erwartungswert und Varianz der Inversen Gammaverteilung: <span class="math display">\[\mathbb{E}_{InvGamma}(\alpha, \beta)=\tfrac{\beta}{\alpha-1} \quad \forall \alpha&gt;1\]</span> sowie <span class="math display">\[\mathbb{Var}_{InvGamma}(\alpha, \beta)=\tfrac{\beta^2}{(\alpha-1)^2(\alpha-2)} \quad \forall \alpha&gt;2\]</span></p>
+<p>Als Erwartungswert für die Prior Inverse Gammmaverteilung wählen wir aufgrund des relativ hohen Gütemaßes in der “Prior-Regression” auch die geschätzte Standardabweichung ebendieser Regression. Da wir außerdem aufgrund des hohen Gütemaßes davon ausgehen können, dass die geschätzte Standardabweichung relativ nah bei der tatsächlichen Standardabweichung liegt (was sich bei Blick auf die zuvor definierte, wahre Standardabweichung auch bestätig), sollte sich dies auch in einer relativ geringen Varianz der Prior Inverse Gamma wiederspiegeln. Damit diese Varianz existiert, muss der Shape-Parameter Alpha wiederum größer als <strong>2</strong> sein. Damit außerdem die Varianz nicht zu groß wird, sollten Shape- und Skalenparameter nicht zu weit auseinander liegen, bzw. aufgrund der Potenzen im besten Fall beide relativ klein sein - hier legen wir diese auf <strong>3.5</strong> fest, um eine gewisse Sicherheit bezüglich der tatsächlichen Standardabweichung auszudrücken. Daraus ergeben sich dementsprechend folgende Bedingungen für die Parameter der Inversen Gamma Prior: <span class="math display">\[\tfrac{\beta}{\alpha-1}\overset{!}{=}\hat{SD}_{'PriorRegression'}\]</span> <span class="math display">\[\tfrac{\beta^2}{(\alpha-1)^2(\alpha-2)}\overset{!}{=}3.5^2\]</span> sowie die Nebenbedingung: <span class="math display">\[\alpha\overset{!}{&gt;}2\]</span> (zusätzlich zu der allgemeinen Voraussetzung, dass Shape- und Scaleparameter einer Inversen Gammaverteilung größer als 0 sein müssen, was aber unter den o.g. Bedingungen in jedem Fall gegeben ist)</p>
+<p>Damit ergeben sich die beiden Parameter der Inverse Gammaverteilung zu: <span class="math display">\[\alpha=(\tfrac{\hat{SD}_{'PriorRegression'}}{3.5})^2+2 \quad (&gt;2)\]</span> <span class="math display">\[\beta=\hat{SD}_{'PriorRegression'}(\alpha-1)\]</span></p>
+<pre class="r"><code>alphaPrior = (sdPriorExpectation/3.5)^2+2
+betaPrior = sdPriorExpectation*(alphaPrior-1)
+
+
+#kurzer Sanity-Check:
+print(&quot;SD nach PriorRegression&quot;)</code></pre>
+<pre><code>## [1] &quot;SD nach PriorRegression&quot;</code></pre>
+<pre class="r"><code>print(sdPriorExpectation)</code></pre>
+<pre><code>## [1] 5.130819</code></pre>
+<pre class="r"><code>print(&quot;Erwartungswert Inverse Gamma&quot;)</code></pre>
+<pre><code>## [1] &quot;Erwartungswert Inverse Gamma&quot;</code></pre>
+<pre class="r"><code>print(betaPrior/(alphaPrior-1))</code></pre>
+<pre><code>## [1] 5.130819</code></pre>
+<pre class="r"><code>print(&quot;Standardabweichung Inverse Gamma&quot;)</code></pre>
+<pre><code>## [1] &quot;Standardabweichung Inverse Gamma&quot;</code></pre>
+<pre class="r"><code>print(sqrt(betaPrior^2/((alphaPrior-1)^2*(alphaPrior-2))))</code></pre>
+<pre><code>## [1] 3.5</code></pre>
+<p>Nachdem wir die Parameter für die Prior-Verteilungen festgelegt haben, können wir jetzt die eigentliche Regression durchführen. Da es im Grunde unendlich viele Möglichkeiten gibt, die Ausgangsverteilungen und Hyperparameter für Prior- und Proposalfunktionen zu bestimmen, beschränken wir uns hier auf die oben vorgestellten Proposal-Funktionen, sowie die gerade definierten Parameter für die Prior-Verteilungen. Als Startwerte werden wir jeweils drei verschiedene Startmöglichkeiten pro Proposal-Funktionen verwenden - die Skalenparameter der Proposal-Densities haben wir durch Trial&amp;Error so angepasst, dass die Acceptance-Rate in etwa den von Gelman für optimal erklärten Wert von 0.234 erreicht.</p>
 </div>
 </div>
 
