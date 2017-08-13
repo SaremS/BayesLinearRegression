@@ -1,5 +1,5 @@
 ---
-title: "Bayesian Linear Regression"
+title: "Bayesian Linear Regression mittels Metropolis-Hastings Algorithmus"
 author: "Marvin Hauser, Sarem Seitz"
 date: "11 August 2017"
 output: html_document
@@ -9,6 +9,8 @@ output: html_document
 library(MCMCpack)
 library(truncnorm)
 ```
+# Kurze Einführung
+Das Thema unserer Arbeit ist die Programmierung eines Metropolis-Hastings Algorithmus zur simulatorischen Berechnung einer zweidimensionalen Normal-Inverse Gamma Posterior-Dichte. Da sich diese Dichte auch bei Bayesianischer Linearer Regression häufig wiederfindet, richten wir unser Programm direkt darauf aus, im Anschluss das genannte Regressionsverfahren in einer Funktion durchzuführen und mithilfe simulierter Daten das Verfahren zu überprüfen.
 
 # Funktionen für den Metropolis-Hastings Algorithmus
 
@@ -171,14 +173,14 @@ Da die acceptance-rate im MH-Algorithmus vor allem von den gewählten Skalenparam
 
 ```{r metropolis Linear Bayes Regression}
 metropolisBayesRegression = function (X, y, startValuesBeta, startValueSd,
-                          nIterations=10000, nBurnIn=500, meanNormalPrior=0, sdNormalPrior=5, shapeInvGammaPrior=1, scaleInvGammaPrior = 1,
-                          proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.5, sdProposalScaleParameter = 0.5)
+                          nIterations=10000, nBurnIn=500, meanNormalPrior=0, sdNormalPrior=5, shapeInvGammaPrior=1, scaleInvGammaPrior = 1, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.5, sdProposalScaleParameter = 0.5)
 {
+  #Sanity check
   if(ncol(X)!=length(startValuesBeta))
   {
     stop("nrow(X) does not match length(startValuesBeta)")
   }
-  
+
   
   totalIterations = nIterations + nBurnIn
   lenBetas = ncol(X)
@@ -196,23 +198,24 @@ metropolisBayesRegression = function (X, y, startValuesBeta, startValueSd,
     
     proposalValues = proposalFunction(currentBetas, currentSd, betaProposalScaleParameter, sdProposalScaleParameter)
     
+    #damit die Proposal-Function nur ein mal benötigt wird, gibt sie alle Proposals gleichzeitig als Liste aus
     proposalBetas = proposalValues[[1]]
     proposalSd = proposalValues[[2]]
     
     currentPosterior = posterior(X, y, currentBetas, currentSd, meanNormalPrior, sdNormalPrior, shapeInvGammaPrior, scaleInvGammaPrior)
     proposalPosterior = posterior(X, y, proposalBetas, proposalSd, meanNormalPrior, sdNormalPrior, shapeInvGammaPrior, scaleInvGammaPrior)
 
+    #re-transformation des (Log-)Likelihood-Ratios um die Random-Acceptance durchzuführen
     likelihoodRatio = exp(proposalPosterior - currentPosterior)
     
-
+    #gerade bei unzulässigen Proposal-Werten für die Varianz bzw. Standardabweichung ist der Wert des Likelihood-Ratios 'NaN'. Damit hier keine Probleme im if-statement weiter unten entstehen, ersetzen wir hier den NaN-Wert mit 0, was zu einer sofortigen Rejection der Proposal-Werte führt. Im großen und Ganzen möchten wir aber versuchen, unzulässige Werte für unsere Parameter direkt zu vereiden, um nicht unnötig viele Iterationen zu verschwenden.
     if (is.nan(likelihoodRatio))
       {
         likelihoodRatio = 0
       }
     
-
-    comparisonValue = min(likelihoodRatio, 1)
     
+    comparisonValue = min(likelihoodRatio, 1)
     
     
     if(runif(1)<comparisonValue)
@@ -229,6 +232,7 @@ metropolisBayesRegression = function (X, y, startValuesBeta, startValueSd,
   
   acceptanceRate = 1-mean(duplicated(markovChain[-(1:nBurnIn),]))
 
+  #Wenn Beta ein einzelner Skalar ist, kann colMeans nicht ohne weitere Transformation angewandt werden
   if (lenBetas>1)
   {
     meanBetas = colMeans(markovChain[-(1:nBurnIn),1:lenBetas])
@@ -243,23 +247,75 @@ metropolisBayesRegression = function (X, y, startValuesBeta, startValueSd,
   simulationResult = list(meanBetas, meanSd, markovChain[-(1:nBurnIn),],
                           markovChain, markovChain[(1:nBurnIn),], acceptanceRate) 
   
+  names(simulationResult) = c("meanBetas", "meanSd", "chainNoBurnIn", "wholeChain", "chainBurnInOnly", "acceptanceRate")
+  
   return(simulationResult)
-
 }
 
 ```
 
 
+#Experimenteller Teil
+
+Im experimentellen Teil werden wir den oben vorgestellten Metropolis-Algorithmus zuerst auf einen künstlich erzeugten Datensatz anwenden, bei dem alle Parameter a priori bekannt sind. Dies ermöglicht es uns vor allem, die Ergebnisse unseres Programms auf Korrektheit zu überprüfen.
 
 
+## Generierung zufälliger Testdaten
 
+Da die Funktion 'metropolisBayesRegression' auf Regression in Matrix-Notation ausgelegt ist, werden die Testdaten entsprechend generiert.
 
-## Including Plots
+```{r generateTestData}
+set.seed(5234)
 
-You can also embed plots, for example:
+beta0 = -2.234
+beta1 = 1.345
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+sampleSize = 100
+standardDeviation = 5
+
+X = cbind(rep(1,sampleSize), runif(sampleSize, -10,10))
+y = X%*%c(beta0,beta1) + rnorm(sampleSize, 0, standardDeviation)
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Für ggplot werden X und y zu einem data.frame Objekt zusammengefasst:
+
+```{r prepareForPlot}
+ggData = as.data.frame(cbind(y,X[,2]))
+colnames(ggData) = c("endog", "exog")
+
+library(ggplot2)
+```
+
+```{r plot, echo=FALSE, align="center"}
+
+plotTestData <- ggplot(ggData, aes(x = exog, y = endog))+geom_point()+geom_abline(intercept = beta0, slope = beta1,colour="red")
+plotTestData
+```
+
+## Bestimmung der Prior-Parameter
+Um möglichst sinnvolle Werte für unsere Prior-Verteilungen festlegen zu können, teilen wir den künstlich erzeugten Datensatz zufällig in zwei Teile à 1/10 und 9/10 auf. Den kleineren Teil nutzen wir, um aus einer einfachen linearen Regression 'a-priori' Informationen über die Regressionsparameter zu gewinnen. Würden wir uns streng an das Bayes-Paradigma halten, müssten wir hier mit uninformativen Priors arbeiten - da der Fokus unserer Arbeit aber auf Normal-/Inverse Gamma Priors liegt, arbeiten wir an dieser Stelle noch mit klassischer Regression. 
+
+```{r aPrioriRegression}
+set.seed(3456)
+
+priorDataPoints = sample(1:sampleSize, round(sampleSize/10))
+
+priorX = X[priorDataPoints,]
+priorY = y[priorDataPoints,]
+
+#hier werden die Datenpunkte für die eigentliche Bayes-Regression bestimmt
+bayesX = X[-priorDataPoints,]
+bayesY = y[-priorDataPoints]
+
+priorRegression = lm(priorY~0+priorX)
+
+print(summary(priorRegression))
+
+```
+
+Wir nehmen nun an, dass die oben errechneten Werte aus einer vorhergehenden Studie stammen und uns lediglich die Regressionsergebnisse vorliegen, nicht aber die einzelnen Daten (da wir ansonsten einfach die a priori Daten mit unseren vereinen und die Regression anhand der vereinigten Daten durchführen könnten, was informative Prior-Verteilungen wieder hinfällig machen würde)
+```{r priorSetting}
+
+
+```
