@@ -2,7 +2,9 @@
 title: "Bayesian Linear Regression mittels Metropolis-Hastings Algorithmus"
 author: "Marvin Hauser, Sarem Seitz"
 date: "11 August 2017"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -105,17 +107,14 @@ proposalFunction1 <- function(betas, sd, betaProposalSd = 0.5, sdProposalSd = 0.
 
 
 ### Proposal Function 2
-proposalFunction2 nutzt eine gewöhnliche Normalverteilung wie häufig vorgeschlagen auch für die 
-Standardabweichung. Entsprechend sollten für die Skalenparameter (hier 'sdProposalSd') auch entsprechend
-kleinere Werte gewählt werden als bei der trunkierten Normalverteilung, um allzu häufige Sprünge in 
-den Bereich <=0 zu vermeiden.
+proposalFunction2 nutzt eine t-Verteilung für die Betas und eine log-Normalverteilung für die Proposal der Standardabweichung. Damit die t-Verteilung eine endliche Varianz besitzt, muss die Anzahl der Freiheitsgrade >2 sein - wir haben uns für df = 3 entschieden, um einen deutlichen Unterschied zur Normalverteilung zu gewährleisten.
 ```{r proposal function 2}
 proposalFunction2 <- function(betas, sd, betaProposalSd = 0.5, sdProposalSd = 0.5){
   
   lenBetas = length(betas)
   
-  proposalBetas = rnorm(lenBetas, mean = betas, sd = betaProposalSd)
-  proposalSd = rnorm(1,mean=sd, sd=sdProposalSd)
+  proposalBetas = rt(lenBetas, df = 3)*betaProposalSd
+  proposalSd = rlnorm(1,meanlog=sd, sd=sdProposalSd)
   
   return(list(proposalBetas, proposalSd))
   
@@ -185,8 +184,9 @@ metropolisBayesRegression = function (X, y, startValuesBeta, startValueSd,
   totalIterations = nIterations + nBurnIn
   lenBetas = ncol(X)
   
-  markovChain = data.frame(matrix(NaN, nrow = totalIterations+1, ncol=lenBetas+1))
-  colnames(markovChain) = c(paste("BETA",seq(0,lenBetas-1)),"SD")
+  markovChain = data.frame(matrix(NaN, nrow = totalIterations+1, ncol=lenBetas+2))
+  colnames(markovChain) = c(paste("beta",seq(0,lenBetas-1),sep=""),"SD","iter")
+  
   
   markovChain[1, 1:lenBetas] = startValuesBeta
   markovChain[1, lenBetas+1] = startValueSd
@@ -244,6 +244,9 @@ metropolisBayesRegression = function (X, y, startValuesBeta, startValueSd,
 
   meanSd = mean(markovChain[-(1:nBurnIn), lenBetas+1])
   
+  #eine extra-Spalte für die Nummer der Iteration erleichtert das Plotten mit ggplot
+  markovChain$iter = seq(0,totalIterations)
+
   simulationResult = list(meanBetas, meanSd, markovChain[-(1:nBurnIn),],
                           markovChain, markovChain[(1:nBurnIn),], acceptanceRate) 
   
@@ -344,14 +347,242 @@ betaPrior = sdPriorExpectation*(alphaPrior-1)
 
 
 #kurzer Sanity-Check:
-print("SD nach PriorRegression")
 print(sdPriorExpectation)
-print("Erwartungswert Inverse Gamma")
 print(betaPrior/(alphaPrior-1))
-print("Standardabweichung Inverse Gamma")
 print(sqrt(betaPrior^2/((alphaPrior-1)^2*(alphaPrior-2))))
 
 ```
 
+## Bestimmung der Startwerte
 Nachdem wir die Parameter für die Prior-Verteilungen festgelegt haben, können wir jetzt die eigentliche Regression durchführen. Da es im Grunde unendlich viele Möglichkeiten gibt, die Ausgangsverteilungen und Hyperparameter für Prior- und Proposalfunktionen zu bestimmen, beschränken wir uns hier auf die oben vorgestellten Proposal-Funktionen, sowie die gerade definierten Parameter für die Prior-Verteilungen.
-Als Startwerte werden wir jeweils drei verschiedene Startmöglichkeiten pro Proposal-Funktionen verwenden - die Skalenparameter der Proposal-Densities haben wir durch Trial&Error so angepasst, dass die Acceptance-Rate in etwa den von Gelman für optimal erklärten Wert von 0.234 erreicht.
+Als Startwerte werden wir jeweils drei verschiedene Startmöglichkeiten pro Proposal-Funktionen verwenden, eine davon mit Startwerten nahe der wahren Werte, eine mit Startwerten für die Betas, die weit entfernt von ihren waren Werten liegen, sowie Startwerte, bei denen alle Werte weit entfernt von ihren wahren Werten liegen. Die Skalenparameter der Proposal-Densities haben wir durch Trial&Error so angepasst, dass die Acceptance-Rate von Proposal Function 1 bei Startwerten **nahe der wahren Parameter** in etwa den von Gelman für optimal erklärten Wert von 0.234 erreicht. Für alle anderen Proposal Funktionen werden dieselben  Werte für die Skalenparameter verwendet, um einen Vergleich zwischen den Proposal Densities zu erleichtern.
+
+
+
+```{r startValuesPF1}
+startValBeta1 = c(-1.5, 0.5)
+startValSd1 = 4
+
+startValBeta2 = c(10,-7)
+startValSd2 = 4
+
+startValBeta3 = c(10,-7)
+startValSd3 = 15
+```
+
+
+## Durchführung der Regression
+
+### Proposal Function 1
+```{r seed1}
+set.seed(876)
+```
+
+```{r regressionProposal1}
+bayRegProp1start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp1start1$acceptanceRate)
+
+
+bayRegProp1start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp1start2$acceptanceRate)
+
+
+bayRegProp1start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp1start3$acceptanceRate)
+```
+
+### Proposal Funktion 2
+```{r seed2}
+set.seed(876)
+```
+
+```{r regressionProposal2}
+bayRegProp2start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp2start1$acceptanceRate)
+
+
+bayRegProp2start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp2start2$acceptanceRate)
+
+
+bayRegProp2start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp2start3$acceptanceRate)
+```
+
+
+### Proposal Funktion 3
+```{r seed3}
+set.seed(876)
+```
+
+```{r regressionProposal3}
+bayRegProp3start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp3start1$acceptanceRate)
+
+
+bayRegProp3start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp3start2$acceptanceRate)
+
+
+bayRegProp3start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+
+print(bayRegProp3start3$acceptanceRate)
+```
+
+
+Nach Durchführung der Regression mit Hilfe des Metropolis-Algorithmus sollen jetzt die Ergebnisse analysiert werden.
+
+### Vergleich der unterschiedlichen Proposal-Funktionen
+
+Für Proposal-Function 2 liegt die Acceptance-Rate deutlich unter der von Proposal Function 1 - bzw. es fand keine Acceptance über die gesamt Markov-Kette erkennbar. Dies ist damit begründbar, dass die Varianzen der entsprechenden Vorschlagsverteilungen ([skalierte] Student-t und log-Normal) bei gleichen Skalenparametern höhere Wahrscheinlichkeiten für extremere Werte haben. Dies führt dementsprechend zu höherer Wahrscheinlichkeit, bei bereits "guten" Parameterwerten in der Markov-Chain, den Bereich der Parameterwerte mit hohen Likelihoods sprunghaft wieder zu verlassen und damit eine Rejetion der Proposal-Werte zu 
+Um also eine angemessene Acceptance-Rate zu erzielen, müssten wir die Skalenparameter deutlich reduzieren, was wir hier aber auslassen möchten.  
+Im Gegensatz dazu ist die Acceptance-Rate bei Gleichverteilungen mit gleichem Skalenparameter (**hier allerdings nicht mit der Standardabweichung zu verwechseln**) deutlich höher als bei (trunkierter) Normalverteilung. Da die Wertebereiche bei den Gleichverteilungen abhängig von den Skalenparametern sind und diese hier relativ klein gehalten sind, sind Sprünge aus dem Parameterbereich mit hohen Likelihood-Werten deutlich unwahrscheinlicher als bei Normalverteilungen, deren Träger sich ja über alle reellen, bzw. alle positiven reellen Zahlen erstreckt.  
+
+### Analyse der Markov Kette
+Zum Abschluss widmen wir uns der eigentlichen Analyse der Likelihood, vor allem hinsichtlich Konvergenz und Parameterschätzung. Da die Analysen für alle Proposal-Funktionen ähnlich ablaufen würde (mit Ausnahme von Proposal-Funktion 2, wo wir ja in diesem Experiment kein verwertbares Ergebnis erzielt haben), beschränken wir diese Analyse auf Proposal-Funktion 1 mit jeweils drei Startparameter-Tupeln (beta0, beta1, Standardabweichung)  
+   
+Für die gesamte Markov-Kette, also inklusive BurnIn-Phase, ergibt sich für die drei Start-Werte folgendes Bild:
+
+```{r multiplot, echo=FALSE}
+#Funktion für multiplot - übernommen von http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  if (is.null(layout)) {
+
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    for (i in 1:numPlots) {
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+```
+
+## Analyse des Konvergenzverhaltens
+
+### Startwerte nahe der wahren Werte
+```{r mc1Convergence, echo = FALSE}
+mc1Convp1 = ggplot(bayRegProp1start1$wholeChain, aes(x=iter, y=beta0)) + geom_line(color = 1
+) + xlab("Iteration") + ylab("beta0") + ggtitle("Konvergenz beta0") + geom_hline(yintercept = beta0, color=4)
+
+mc1Convp2 = ggplot(bayRegProp1start1$wholeChain, aes(x=iter, y=beta1)) + geom_line(color=2) + xlab("Iteration") + ylab("beta1") + ggtitle("Konvergenz beta1") + geom_hline(yintercept = beta1, color=4)
+
+mc1Convp3 = ggplot(bayRegProp1start1$wholeChain, aes(x=iter, y=SD)) + geom_line(color=3) + xlab("Iteration") + ylab("SD") + ggtitle("Konvergenz SD") + geom_hline(yintercept = standardDeviation, color=4)
+
+multiplot(mc1Convp1, mc1Convp2, mc1Convp3)
+```
+
+Für beta0 wird die Konvergenz sehr früh erreicht. Auch für die anderen beiden Parameter ist eine schnelle Konvergenz festzustellen - einzig sehr kurz nach Beginn der BurnIn-Phase sind starke Ausschläge zu erkennen. Ansonsten haben - mit Ausnahme der Standardabweichung um Iteration 9000 - die Markov-Ketten einen erkennbaren Konvergenzverlauf.
+
+### Beta-Startwerte weiter von den wahren Parametern entfernt
+
+```{r mc2Convergence, echo = FALSE}
+mc2Convp1 = ggplot(bayRegProp1start2$wholeChain, aes(x=iter, y=beta0)) + geom_line(color = 1
+) + xlab("Iteration") + ylab("beta0") + ggtitle("Konvergenz beta0") + geom_hline(yintercept = beta0, color=4)
+
+mc2Convp2 = ggplot(bayRegProp1start2$wholeChain, aes(x=iter, y=beta1)) + geom_line(color=2) + xlab("Iteration") + ylab("beta1") + ggtitle("Konvergenz beta1")+ geom_hline(yintercept = beta1, color=4)
+
+mc2Convp3 = ggplot(bayRegProp1start2$wholeChain, aes(x=iter, y=SD)) + geom_line(color=3) + xlab("Iteration") + ylab("SD") + ggtitle("Konvergenz SD") + geom_hline(yintercept = standardDeviation, color=4)
+
+multiplot(mc2Convp1, mc2Convp2, mc2Convp3)
+```
+
+Wie zu erwarten benötigt die Markov-Kette zu Beginn der Burn-In Phase erkennbar länger, um Konvergenz zu erreichen. Auffällig ist, dass auch die Standardabweichung trotz Startwert nahe des wahren Wertes in etwa so lange wie die anderen Parameter benötigt, bis sich erkennbare Konvergenz einstellt. Eine mögliche Erklärung hierfür könnte sein, dass "unpassendere" Werte der Standardabweichung für bessere Posterior Likelihood-Werte bei ebenfalls weiter entfernten Beta-Parametern sorgt.
+
+### Alle Startwerte weiter vom wahren Wert entfernt
+
+```{r mc3Convergence, echo = FALSE}
+mc3Convp1 = ggplot(bayRegProp1start3$wholeChain, aes(x=iter, y=beta0)) + geom_line(color = 1
+) + xlab("Iteration") + ylab("beta0") + ggtitle("Konvergenz beta0") + geom_hline(yintercept = beta0, color=4)
+
+mc3Convp2 = ggplot(bayRegProp1start3$wholeChain, aes(x=iter, y=beta1)) + geom_line(color=2) + xlab("Iteration") + ylab("beta1") + ggtitle("Konvergenz beta1") + geom_hline(yintercept = beta1, color=4)
+
+mc3Convp3 = ggplot(bayRegProp1start3$wholeChain, aes(x=iter, y=SD)) + geom_line(color=3) + xlab("Iteration") + ylab("SD") + ggtitle("Konvergenz SD") + geom_hline(yintercept = standardDeviation, color=4)
+
+multiplot(mc3Convp1, mc3Convp2, mc3Convp3)
+```
+
+Auch hier erreicht die Markov-Kette die Konvergenz trotz anfangs relativ weit von den wahren Parameterwerten entfernten Startwerten. Da mit allen drei Startwerten ein ähnlicher Konvergenzzustand hinsichtlich der wahren Parameterwerte erreicht wird, beschränken wir die weitere Analyse auf den Fall von Startwerten nahe der wahren Parameterwerte
+
+## ACF der Markov-Ketten nach BurnIn-Phase
+Nun wollen wir nachvollziehen, wie stark die Autokorrleation zwischen den Iterationen der Markov-Kette 
+ist. Wir beschränken uns aus ACF-Plots.
+
+```{r ACFs, echo = FALSE}
+ac1 = as.data.frame(cbind(acf(bayRegProp1start1$chainNoBurnIn[,1], plot = FALSE)$lag,
+                          acf(bayRegProp1start1$chainNoBurnIn[,1], plot = FALSE)$acf))
+colnames(ac1) = c("lag", "acf")
+                    
+ac2 = as.data.frame(cbind(acf(bayRegProp1start1$chainNoBurnIn[,2], plot = FALSE)$lag,
+                          acf(bayRegProp1start1$chainNoBurnIn[,2], plot = FALSE)$acf))
+colnames(ac2) = c("lag", "acf")
+
+ac3 = as.data.frame(cbind(acf(bayRegProp1start1$chainNoBurnIn[,3], plot = FALSE)$lag,
+                          acf(bayRegProp1start1$chainNoBurnIn[,3], plot = FALSE)$acf))
+colnames(ac3) = c("lag", "acf")
+
+acfPlot1 = ggplot(data = ac1, mapping = aes(x = lag, y = acf)) +
+       geom_hline(aes(yintercept = 0)) +
+       geom_segment(mapping = aes(xend = lag, yend = 0)) + ggtitle("ACF beta0")
+
+acfPlot2 = ggplot(data = ac2, mapping = aes(x = lag, y = acf)) +
+       geom_hline(aes(yintercept = 0)) +
+       geom_segment(mapping = aes(xend = lag, yend = 0)) + ggtitle("ACF beta1")
+
+acfPlot3 = ggplot(data = ac3, mapping = aes(x = lag, y = acf)) +
+       geom_hline(aes(yintercept = 0)) +
+       geom_segment(mapping = aes(xend = lag, yend = 0))+ ggtitle("ACF SD")
+
+multiplot(acfPlot1, acfPlot2, acfPlot3)
+```
+
+Für alle drei Parameter ist eine starke Autokorrelationzu verzeichnen, wünschenswert wäre allerdings eine möglichst geringe Autokorrelation. Um dies zu erreichen, könnten wir beispielsweise mit Rejection-Sampling arbeiten und nur jede k-te, nicht-verworfene Iteration akzeptieren, worauf wir an dieser Stelle allerdings verzichten.
+
+### Dichte-Plots der Parameter
+Zuletzt plotten wir die Kerndichtechätzungen der drei Parameter. Dies ermöglicht uns einen besseren Einblick in die Verteilung der einzelnen Parameter.
+
+```{r kde}
+kd1 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(beta0)) + geom_density(color = 1, fill = 1, alpha = 0.1) + geom_vline(xintercept = beta0, color = 4) + ggtitle("KDE beta0") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,1]), color = 6)
+
+kd2 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(beta1)) + geom_density(color = 2, fill = 2, alpha = 0.1) + geom_vline(xintercept = beta1, color = 4) + ggtitle("KDE beta1") + ggtitle("KDE beta0") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,2]), color = 6)
+
+kd3 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(SD)) + geom_density(color = 3, fill = 3, alpha = 0.1) + geom_vline(xintercept = standardDeviation, color = 4) + ggtitle("KDE SD") + ggtitle("KDE beta0") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,3]), color = 6)
+
+multiplot(kd1, kd2, kd3)
+
+
+```
+
+Offensichtlich überschätzt der Bayes-Schätzer (Mittelwert der Markov-Kette, violette Linie) für beta0 den wahren Parameter (blaue Linie) und unterschätzt den wahren Parameter für beta1. Im Fall der Varianz trifft der Bayes-Schätzer den wahren Wert sehr gut. Die Abweichungen könnten im vermutlich durch höhere Varianz in den Prior-Verteilungen der Beta-Parameter reduziert werden, was allderdings nicht mehr dem eigentlichen Bayes-Paradigma der Einbindung von a-priori Information entsprechen würde. Nichtsdestotrotz befinden sich die wahren Parameter in einem angemessenen Dichtebereich der Posterior Randdichteverteilungen.
+
+#Schlussbemerkung
+Im Verlauf unserer Arbeit haben wir eine R-Funktion zur Linearen Bayes-Regression mithilfe des Metropolis-Algorithmus erstellt, die wir dann nach Ermittlung geeigneter Parameter für die Normal-Inversegamma Priors auf einen synthetisch erstellten Datensatz angewandt haben. Die Acceptance-Rate ist dabei als stark abhängig von der Wahl passender Proposal-Densities, bzw. geeigneter Skalenparameter ebendieser aufgefallen. Hinsichtlich des Konvergenzverhaltens haben wir eine rasche Konvergenz festgestellt.  
+Die Parameterschätzung selbst erzielte gute Ergebnisse, die besonders für die Standardabweichung nahe am wahren Wert lagen.  
+  
+Es hat sich gezeigt, dass Bayesianische Methoden eine potente Erweiterung der Methoden der klassischen Statistik darstellen, die gerade in Zeiten von Big Data und Machine Learning beispielsweise in Form von Gaussian Processes einen hohen Stellenwert besitzen und in Zukunft wohl auch weiterhin besitzen werden.
