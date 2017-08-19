@@ -10,6 +10,7 @@ output:
 ```{r setup, include=FALSE}
 library(MCMCpack)
 library(truncnorm)
+library(mvtnorm)
 ```
 # Kurze Einführung
 Das Thema unserer Arbeit ist die Programmierung eines Metropolis-Hastings Algorithmus zur simulatorischen Berechnung einer zweidimensionalen Normal-Inverse Gamma Posterior-Dichte. Da sich diese Dichte auch bei Bayesianischer Linearer Regression häufig wiederfindet, richten wir unser Programm direkt darauf aus, im Anschluss das genannte Regressionsverfahren in einer Funktion durchzuführen und mithilfe simulierter Daten das Verfahren zu überprüfen.
@@ -46,15 +47,25 @@ logPriors = function(betas,sd, meanNormalPrior = 0, sdNormalPrior = 5, shapeInvG
     meanNormalPrior = rep(meanNormalPrior,lenBetas)
   }
   
+  #wird ein eizelner Skalar als Standardabweichung angegeben, wird eine Diagonal-(Kovarianz)matrix erstellt,   #bei der alle Elemente der Hauptdiagonalen dem Skalar entsprechen. Zu beachten ist, dass 'mvtnorm' mit den   #(Ko-)Varianzen arbeitet, während ansonsten mit Standardabweichungen gearbeitet wird - also müssen die SDs   #quadriert werden
   if (length(sdNormalPrior) == 1)
   {
-    sdNormalPrior = rep(sdNormalPrior,lenBetas)
+    tempCovMatrix = matrix(0, nrow = lenBetas, ncol = lenBetas)
+    diag(tempCovMatrix) = rep(sdNormalPrior^2,lenBetas)
+    sdNormalPrior = tempCovMatrix
+  }
+  # alternativ kann die Prior-Standardabweichung für jedes Beta einzeln angegeben werden
+  else if(length(sdNormalPrior) == lenBetas)
+  {
+    tempCovMatrix = matrix(0, nrow = lenBetas, ncol = lenBetas)
+    diag(tempCovMatrix) = sdNormalPrior^2
+    sdNormalPrior = tempCovMatrix
   }
   
-  sumLogBetasPrior = sum(
-    dnorm(betas, mean = meanNormalPrior,
-          sd = sdNormalPrior, log = TRUE)
-    )
+  sumLogBetasPrior = 
+    dmvnorm(betas, mean = meanNormalPrior,
+          sigma = sdNormalPrior, log = TRUE)
+    
   
   
   logSdPrior = log(dinvgamma(sd, shape=shapeInvGammaPrior, scale=scaleInvGamma))
@@ -324,6 +335,9 @@ betaPriorSDs = as.numeric(summary(priorRegression)[[4]][,2])
 
 sdPriorExpectation = summary(priorRegression)[[6]]
 
+#Kovarianzmatrix des OLS-Schätzers für die Betas
+covMatPriorExpectation = sqrt(solve(t(priorX)%*%priorX)*sdPriorExpectation^2)
+
 ```
 
 Die Prior Parameter der Betas können wir direkt aus den Ergebnissen der Regression übernehmen. Um die Inverse Gamma Prior für die Standardabweichung vollständig spezifizieren zu können, benötigen wir Shape- und Scaleparameter Alpha und Beta. Um diese zu bestimmen, betrachten wir Erwartungswert und Varianz der Inversen Gammaverteilung: 
@@ -381,17 +395,17 @@ set.seed(876)
 ```
 
 ```{r regressionProposal1}
-bayRegProp1start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp1start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp1start1$acceptanceRate)
 
 
-bayRegProp1start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp1start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp1start2$acceptanceRate)
 
 
-bayRegProp1start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp1start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction1, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp1start3$acceptanceRate)
 ```
@@ -402,17 +416,17 @@ set.seed(876)
 ```
 
 ```{r regressionProposal2}
-bayRegProp2start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp2start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp2start1$acceptanceRate)
 
 
-bayRegProp2start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp2start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp2start2$acceptanceRate)
 
 
-bayRegProp2start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp2start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction2, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp2start3$acceptanceRate)
 ```
@@ -424,21 +438,44 @@ set.seed(876)
 ```
 
 ```{r regressionProposal3}
-bayRegProp3start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp3start1 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta1, startValueSd = startValSd1, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp3start1$acceptanceRate)
 
 
-bayRegProp3start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp3start2 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta2, startValueSd = startValSd2, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp3start2$acceptanceRate)
 
 
-bayRegProp3start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = betaPriorSDs, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
+bayRegProp3start3 = metropolisBayesRegression(bayesX, bayesY, startValuesBeta = startValBeta3, startValueSd = startValSd3, nIterations = 10000, nBurnIn = 5000, meanNormalPrior = betaPriorMeans, sdNormalPrior = covMatPriorExpectation, shapeInvGammaPrior = alphaPrior, scaleInvGammaPrior = betaPrior, proposalFunction = proposalFunction3, betaProposalScaleParameter = 0.35, sdProposalScaleParameter = 0.35)
 
 print(bayRegProp3start3$acceptanceRate)
 ```
+```{r tableAcceptance, echo = FALSE, results = "asis"}
 
+acceptanceTable = matrix(0, nrow = 3, ncol = 3)
+colnames(acceptanceTable) = c("Proposal Function 1", "Proposal Function 2", "Proposal Function 3")
+rownames(acceptanceTable) = c("Nahe Anfangsparamter", "Weiter entfernte Betas", "Alle Parameter weiter entfernt" )
+
+acceptanceTable[1,1] = bayRegProp1start1$acceptanceRate
+acceptanceTable[1,2] = bayRegProp2start1$acceptanceRate
+acceptanceTable[1,3] = bayRegProp3start1$acceptanceRate
+
+acceptanceTable[2,1] = bayRegProp1start2$acceptanceRate
+acceptanceTable[2,2] = bayRegProp2start2$acceptanceRate
+acceptanceTable[2,3] = bayRegProp3start2$acceptanceRate
+
+acceptanceTable[3,1] = bayRegProp1start3$acceptanceRate
+acceptanceTable[3,2] = bayRegProp2start3$acceptanceRate
+acceptanceTable[3,3] = bayRegProp3start3$acceptanceRate
+
+
+library(knitr)
+kable(acceptanceTable, caption = "Acceptance Rates")
+
+
+```
 
 Nach Durchführung der Regression mit Hilfe des Metropolis-Algorithmus sollen jetzt die Ergebnisse analysiert werden.
 
@@ -572,9 +609,9 @@ Zuletzt plotten wir die Kerndichtechätzungen der drei Parameter. Dies ermöglicht
 ```{r kde}
 kd1 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(beta0)) + geom_density(color = 1, fill = 1, alpha = 0.1) + geom_vline(xintercept = beta0, color = 4) + ggtitle("KDE beta0") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,1]), color = 6)
 
-kd2 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(beta1)) + geom_density(color = 2, fill = 2, alpha = 0.1) + geom_vline(xintercept = beta1, color = 4) + ggtitle("KDE beta1") + ggtitle("KDE beta0") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,2]), color = 6)
+kd2 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(beta1)) + geom_density(color = 2, fill = 2, alpha = 0.1) + geom_vline(xintercept = beta1, color = 4) + ggtitle("KDE beta1") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,2]), color = 6)
 
-kd3 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(SD)) + geom_density(color = 3, fill = 3, alpha = 0.1) + geom_vline(xintercept = standardDeviation, color = 4) + ggtitle("KDE SD") + ggtitle("KDE beta0") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,3]), color = 6)
+kd3 = ggplot(bayRegProp1start1$chainNoBurnIn, aes(SD)) + geom_density(color = 3, fill = 3, alpha = 0.1) + geom_vline(xintercept = standardDeviation, color = 4) + ggtitle("KDE SD") + geom_vline(xintercept = mean(bayRegProp1start1$chainNoBurnIn[,3]), color = 6)
 
 multiplot(kd1, kd2, kd3)
 
